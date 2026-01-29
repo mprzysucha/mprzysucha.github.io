@@ -1,0 +1,2 @@
+c:b:com/badlogic/gdx/utils/lsans-15.fnt:0:0
+c:b:com/badlogic/gdx/utils/lsans-15.png:0:0
