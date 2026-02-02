@@ -22,7 +22,7 @@
         bottom: 4vw;
         pointer-events: auto;
       }
-      .touch-controls .pad { left: 4vw; width: 40vw; height: 30vw; max-width: 260px; max-height: 200px; }
+      .touch-controls .pad { left: 4vw; width: 40vw; height: 40vw; max-width: 240px; max-height: 240px; }
       .touch-controls .actions { right: 4vw; width: 30vw; height: 30vw; max-width: 200px; max-height: 200px; }
       .touch-btn {
         position: absolute;
@@ -41,11 +41,27 @@
       }
       .touch-btn:active,
       .touch-btn.active { background: rgba(120, 200, 255, 0.25); border-color: rgba(120, 200, 255, 0.6); }
-      .btn-up { left: 30%; top: 0; }
-      .btn-down { left: 30%; bottom: 0; }
-      .btn-left { left: 0; top: 30%; }
-      .btn-right { right: 0; top: 30%; }
       .btn-fire { right: 0; bottom: 0; width: 70%; height: 70%; border-radius: 50%; font-size: 16px; }
+      .joystick {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.08);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        touch-action: none;
+      }
+      .joystick .knob {
+        position: absolute;
+        width: 40%;
+        height: 40%;
+        left: 30%;
+        top: 30%;
+        border-radius: 50%;
+        background: rgba(120, 200, 255, 0.25);
+        border: 2px solid rgba(120, 200, 255, 0.6);
+        transform: translate(0, 0);
+      }
       @media (pointer: coarse), (hover: none) {
         .touch-controls { display: block; }
       }
@@ -55,10 +71,9 @@
     <canvas id="canvas"></canvas>
     <div class="touch-controls" id="touch-controls" aria-hidden="true">
       <div class="pad">
-        <div class="touch-btn btn-up" data-key="ArrowUp">Up</div>
-        <div class="touch-btn btn-down" data-key="ArrowDown">Down</div>
-        <div class="touch-btn btn-left" data-key="ArrowLeft">Left</div>
-        <div class="touch-btn btn-right" data-key="ArrowRight">Right</div>
+        <div class="joystick" id="joystick">
+          <div class="knob" id="joystick-knob"></div>
+        </div>
       </div>
       <div class="actions">
         <div class="touch-btn btn-fire" data-key="Space">Fire</div>
@@ -89,6 +104,17 @@
         document.dispatchEvent(event);
       }
 
+      const activeKeys = new Set();
+      function setKeyPressed(keyName, pressed) {
+        if (pressed && !activeKeys.has(keyName)) {
+          activeKeys.add(keyName);
+          dispatchKey("keydown", keyName);
+        } else if (!pressed && activeKeys.has(keyName)) {
+          activeKeys.delete(keyName);
+          dispatchKey("keyup", keyName);
+        }
+      }
+
       function bindTouchControls() {
         const buttons = document.querySelectorAll(".touch-btn[data-key]");
         buttons.forEach(btn => {
@@ -96,17 +122,105 @@
           const onDown = (e) => {
             e.preventDefault();
             btn.classList.add("active");
-            dispatchKey("keydown", keyName);
+            setKeyPressed(keyName, true);
           };
           const onUp = (e) => {
             e.preventDefault();
             btn.classList.remove("active");
-            dispatchKey("keyup", keyName);
+            setKeyPressed(keyName, false);
           };
           btn.addEventListener("pointerdown", onDown);
           btn.addEventListener("pointerup", onUp);
           btn.addEventListener("pointercancel", onUp);
           btn.addEventListener("pointerleave", onUp);
+        });
+
+        const joystick = document.getElementById("joystick");
+        const knob = document.getElementById("joystick-knob");
+        if (!joystick || !knob) return;
+
+        let activePointerId = null;
+        let centerX = 0;
+        let centerY = 0;
+        let maxRadius = 0;
+
+        function updateCenter() {
+          const rect = joystick.getBoundingClientRect();
+          centerX = rect.left + rect.width / 2;
+          centerY = rect.top + rect.height / 2;
+          maxRadius = rect.width * 0.35;
+        }
+
+        function setDir(dx, dy) {
+          const angle = Math.atan2(-dy, dx) * (180 / Math.PI);
+          const distance = Math.min(Math.sqrt(dx * dx + dy * dy), maxRadius);
+          const normX = (dx / (distance || 1)) * (distance / maxRadius);
+          const normY = (dy / (distance || 1)) * (distance / maxRadius);
+          knob.style.transform = `translate(${normX * maxRadius}px, ${normY * maxRadius}px)`;
+
+          if (distance < maxRadius * 0.2) {
+            setKeyPressed("ArrowUp", false);
+            setKeyPressed("ArrowDown", false);
+            setKeyPressed("ArrowLeft", false);
+            setKeyPressed("ArrowRight", false);
+            return;
+          }
+
+          const up = angle >= -45 && angle <= 45;
+          const right = angle > 45 && angle < 135;
+          const down = angle >= 135 || angle <= -135;
+          const left = angle < -45 && angle > -135;
+
+          setKeyPressed("ArrowUp", up);
+          setKeyPressed("ArrowDown", down);
+          setKeyPressed("ArrowLeft", left);
+          setKeyPressed("ArrowRight", right);
+
+          if (up) {
+            const horizontalBias = dx / maxRadius;
+            if (horizontalBias > 0.25) {
+              setKeyPressed("ArrowRight", true);
+            } else if (horizontalBias < -0.25) {
+              setKeyPressed("ArrowLeft", true);
+            }
+          }
+        }
+
+        function resetStick() {
+          knob.style.transform = "translate(0, 0)";
+          setKeyPressed("ArrowUp", false);
+          setKeyPressed("ArrowDown", false);
+          setKeyPressed("ArrowLeft", false);
+          setKeyPressed("ArrowRight", false);
+        }
+
+        joystick.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          if (activePointerId !== null) return;
+          activePointerId = e.pointerId;
+          joystick.setPointerCapture(activePointerId);
+          updateCenter();
+          setDir(e.clientX - centerX, e.clientY - centerY);
+        });
+
+        joystick.addEventListener("pointermove", (e) => {
+          if (e.pointerId !== activePointerId) return;
+          e.preventDefault();
+          setDir(e.clientX - centerX, e.clientY - centerY);
+        });
+
+        joystick.addEventListener("pointerup", (e) => {
+          if (e.pointerId !== activePointerId) return;
+          e.preventDefault();
+          activePointerId = null;
+          resetStick();
+        });
+
+        joystick.addEventListener("pointercancel", (e) => {
+          if (e.pointerId !== activePointerId) return;
+          e.preventDefault();
+          activePointerId = null;
+          resetStick();
         });
       }
 
